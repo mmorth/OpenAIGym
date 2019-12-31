@@ -3,6 +3,7 @@ from nes_py.wrappers import JoypadSpace
 import gym_super_mario_bros
 from gym_super_mario_bros.actions import SIMPLE_MOVEMENT
 import random
+import os
 from collections import deque
 import numpy as np
 import tensorflow as tf
@@ -10,6 +11,7 @@ from tensorflow.keras import Sequential
 from tensorflow.keras.layers import Dense
 from tensorflow.keras.layers import Flatten
 from tensorflow.keras.optimizers import Adam
+
 
 # Source: •	https://keon.io/deep-q-learning/ (with significant adaptations)
 # Deep Double Q-Learning Agent
@@ -62,7 +64,7 @@ class DDQNAgent:
         else:
             # Determine the maximal action from Q1 + Q2
             # image = tf.cast(state, tf.float32)
-            image = tf.cast(np.reshape(state, (1, 240, 256, 3)) , tf.float32)
+            image = tf.cast(np.reshape(state, (1, 240, 256, 3)), tf.float32)
             act_values_1 = self.model_1.predict(image)
             act_values_2 = self.model_2.predict(image)
 
@@ -73,7 +75,7 @@ class DDQNAgent:
             return np.argmax(act_values_combined)
 
     # Train the neural network using experience replay
-    def replay(self, batch_size, memory):
+    def replay(self, batch_size, memory, cp_1_callback, cp_2_callback):
         # Create a minibatch of previously observed samples
         if len(memory) < batch_size:
             return
@@ -106,7 +108,7 @@ class DDQNAgent:
                 qsa_target[0][action] = target
 
                 # Train the updated model to fit the new qsa_target value (update network weights)
-                self.model_1.fit(state_cast, qsa_target, epochs=1, verbose=0)
+                self.model_1.fit(state_cast, qsa_target, epochs=1, verbose=0, callbacks=[cp_1_callback])
             else:
                 # Update Q2
                 # qsa2 = Q2(S, A)
@@ -125,18 +127,21 @@ class DDQNAgent:
                 qsa_target[0][action] = target
 
                 # Train the updated model to fit the new qsa_target value (update network weights)
-                self.model_2.fit(state_cast, qsa_target, epochs=1, verbose=0)
+                self.model_2.fit(state_cast, qsa_target, epochs=1, verbose=0, callbacks=[cp_2_callback])
 
     # Decay the epsilon value by decay amount if it is not already at the minimum
     def decay_epsilon(self):
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
 
+
 # Trains the agent using the Double Deep Q-Learning network
 if __name__ == "__main__":
     # Configure gym environment and action space
     env = gym_super_mario_bros.make('SuperMarioBros-v0')
     env = JoypadSpace(env, SIMPLE_MOVEMENT)
+
+    print("Num GPUs Available: ", len(tf.config.experimental.list_physical_devices('GPU')))
 
     # Declare the agent
     agent = DDQNAgent(env)
@@ -153,10 +158,25 @@ if __name__ == "__main__":
     score = 0
     done = True
 
-    # Loop for each step
-    for step in range(5000):
+    # Configure model saving
+    checkpoint_1_path = "supermariobros_training/cp1.ckpt"
+    checkpoint_1_dir = os.path.dirname(checkpoint_1_path)
+
+    checkpoint_2_path = "supermariobros_training/cp2.ckpt"
+    checkpoint_2_dir = os.path.dirname(checkpoint_2_path)
+
+    cp_1_callback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_1_path,
+                                                       save_weights_only=True,
+                                                       verbose=1)
+
+    cp_2_callback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_2_path,
+                                                       save_weights_only=True,
+                                                       verbose=1)
+
+    for step in range(10000):
         if done:
             state = env.reset()
+            score = 0
         env.render()
 
         # Determine action to take (Choose A from S using the policy e-greedy in Q1 + Q2)
@@ -176,7 +196,7 @@ if __name__ == "__main__":
 
         # Source: •	https://towardsdatascience.com/reinforcement-learning-w-keras-openai-dqns-1eed3a5338c
         # Update Q1(S, A) or Q2(S, A) using Experience Replay
-        agent.replay(minibatch_size, memory)
+        agent.replay(minibatch_size, memory, cp_1_callback, cp_2_callback)
 
         # Update state (S <- S')
         state = next_state
@@ -191,3 +211,5 @@ if __name__ == "__main__":
         agent.decay_epsilon()
 
     env.close()
+
+    model.save('super_mario_bros_1.h5')
