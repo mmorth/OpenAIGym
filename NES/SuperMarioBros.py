@@ -134,6 +134,11 @@ class DDQNAgent:
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
 
+    # Save models
+    def save_models(self):
+        self.model_1.save('super_mario_bros_1.h5')
+        self.model_2.save('super_mario_bros_2.h5')
+
 
 # Trains the agent using the Double Deep Q-Learning network
 if __name__ == "__main__":
@@ -141,21 +146,16 @@ if __name__ == "__main__":
     env = gym_super_mario_bros.make('SuperMarioBros-v0')
     env = JoypadSpace(env, SIMPLE_MOVEMENT)
 
-    print("Num GPUs Available: ", len(tf.config.experimental.list_physical_devices('GPU')))
-
     # Declare the agent
     agent = DDQNAgent(env)
 
     # Create memory storage for experience replay
     memory = deque(maxlen=2000)
 
-    # Configure the random seeds for reproducability
-    np.random.seed(100)
-    env.seed(100)
-
     # Declare the number of episodes, steps per episode, and experience replay mini-batch size
-    minibatch_size = 1
+    minibatch_size = 32
     score = 0
+    best = 0
     done = True
 
     # Configure model saving
@@ -173,43 +173,53 @@ if __name__ == "__main__":
                                                        save_weights_only=True,
                                                        verbose=1)
 
-    for step in range(10000):
-        if done:
-            state = env.reset()
-            score = 0
-        env.render()
+    for episode in range(10000):
+        # Reset state and score
+        state = env.reset()
 
-        # Determine action to take (Choose A from S using the policy e-greedy in Q1 + Q2)
-        action = agent.determine_action(state, env)
+        if score > best:
+            best = score
 
-        # Advance game to next state given action (Take action A, observe R, S')
-        next_state, reward, done, info = env.step(action)
+        score = 0
+        step = 0
 
-        # If the pendulum crosses the black bar, give a reward of 1000 to incentivize future behaviors
-        if done:
-            replay_reward = 1000
-        else:
-            replay_reward = reward
+        while True:
+            # Render game
+            env.render()
 
-        # Remember the current information for experience replay
-        memory.append((state, action, replay_reward, next_state, done))
+            # Determine action to take (Choose A from S using the policy e-greedy in Q1 + Q2)
+            action = agent.determine_action(state, env)
 
-        # Source: •	https://towardsdatascience.com/reinforcement-learning-w-keras-openai-dqns-1eed3a5338c
-        # Update Q1(S, A) or Q2(S, A) using Experience Replay
-        agent.replay(minibatch_size, memory, cp_1_callback, cp_2_callback)
+            # Advance game to next state given action (Take action A, observe R, S')
+            next_state, reward, done, info = env.step(action)
 
-        # Update state (S <- S')
-        state = next_state
+            # Remember the current information for experience replay
+            memory.append((state, action, reward, next_state, done))
 
-        # Update score
-        score += reward
+            # Update state (S <- S')
+            state = next_state
 
-        # Print score
-        print("Step: {}, score: {}".format(step, score))
+            # Update score
+            score += reward
 
-        # Decay the epsilon value after each episode
-        agent.decay_epsilon()
+            # Print score
+            print("Episode: {}, Step: {}, Score: {}".format(episode, step, score))
+
+            # Increment step
+            step = step + 1
+
+            if step % 1000 == 0:
+                # Update Q1(S, A) or Q2(S, A) using Experience Replay
+                agent.replay(minibatch_size, memory, cp_1_callback, cp_2_callback)
+
+                # Decay the epsilon value after each episode
+                agent.decay_epsilon()
+
+            if done == True:
+                break
 
     env.close()
 
-    model.save('super_mario_bros_1.h5')
+    agent.save_models()
+
+    print("Best Score = " + str(best))
