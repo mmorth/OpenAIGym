@@ -10,7 +10,6 @@ from tensorflow.keras.optimizers import Adam
 import tensorflow as tf
 
 
-# Source: •	https://keon.io/deep-q-learning/ (with significant adaptations)
 # Deep Double Q-Learning Agent
 class DDQNAgent:
     # Construct a new DDQNAgent
@@ -29,9 +28,7 @@ class DDQNAgent:
         self.learning_rate = 0.001
 
         # Declare and create the multi-layer Q1 function approximator
-        self.model_1 = self.create_model(env.action_space.n, self.learning_rate)
-        # Declare and create the multi-layer Q2 function approximator
-        self.model_2 = self.create_model(env.action_space.n, self.learning_rate)
+        self.model = self.create_model(env.action_space.n, self.learning_rate)
 
     # Source: https://towardsdatascience.com/reinforcement-learning-w-keras-openai-dqns-1eed3a5338c
     # Construct the Deep Double Q-Learning function approximation neural networks
@@ -39,8 +36,7 @@ class DDQNAgent:
         # Construct the multi-layer feed-forward function approximator neural network
         model = Sequential()
         # Declare dense layers
-        model.add(Dense(24, input_shape=(210, 160, 3), activation="relu"))
-        model.add(Dense(48, activation="relu"))
+        model.add(Dense(48, input_shape=(210, 160, 3), activation="relu"))
         model.add(Dense(24, activation="relu"))
         # Flatten and output for Q(S, all 3 A)
         model.add(Flatten())
@@ -62,14 +58,10 @@ class DDQNAgent:
         else:
             # Determine the maximal action from Q1 + Q2
             image = tf.cast(np.reshape(state, (1, 210, 160, 3)), tf.float32)
-            act_values_1 = self.model_1.predict(image)
-            act_values_2 = self. model_2.predict(image)
-
-            # Store Q1 + Q2 in separate list
-            act_values_combined = act_values_1 + act_values_2
+            act_values = self.model.predict(image)
 
             # Return the highest predicted reward action in Q1 + Q2
-            return np.argmax(act_values_combined)
+            return np.argmax(act_values)
 
     # Train the neural network using experience replay
     def replay(self, batch_size, memory):
@@ -86,45 +78,24 @@ class DDQNAgent:
             state_cast = tf.cast(np.reshape(state, (1, 210, 160, 3)), tf.float32)
             next_state_cast = tf.cast(np.reshape(next_state, (1, 210, 160, 3)), tf.float32)
 
-            # With probability .5 update Q1 and with probability .5 update Q2
-            if np.random.rand() <= .5:
-                # Update Q1
-                # qsa1 = Q1(S, A)
-                qsa1 = self.model_1.predict(state_cast)
-                # qsaprime1 = Q1(S', a)
-                qsaprime1 = self.model_1.predict(next_state_cast)
-                # qsaprime1_maxa = argmax a of Q1(S', a)
-                qsaprime1_maxa = np.argmax(qsaprime1[0])
+            # Update Q1
+            # qsa1 = Q1(S, A)
+            qsa1 = self.model.predict(state_cast)
+            # qsaprime1 = Q1(S', a)
+            qsaprime1 = self.model.predict(next_state_cast)
+            # qsaprime1_maxa = argmax a of Q1(S', a)
+            qsaprime1_maxa = np.argmax(qsaprime1[0])
 
-                # qsaprime2 = Q2(S', a)
-                qsaprime2 = self.model_2.predict(next_state_cast)
+            # qsaprime2 = Q2(S', a)
+            qsaprime2 = self.model.predict(next_state_cast)
 
-                # Q1(S, A) <- Q1(S, A) + (R + y*Q2(S', argmax a of Q1(S', a)) - Q1(S, A))
-                target = qsa1[0][action] + (reward + self.gamma * qsaprime2[0][qsaprime1_maxa] - qsa1[0][action])
-                qsa_target = qsa1
-                qsa_target[0][action] = target
+            # Q1(S, A) <- Q1(S, A) + (R + y*Q2(S', argmax a of Q1(S', a)) - Q1(S, A))
+            target = qsa1[0][action] + (reward + self.gamma * qsaprime2[0][qsaprime1_maxa] - qsa1[0][action])
+            qsa_target = qsa1
+            qsa_target[0][action] = target
 
-                # Train the updated model to fit the new qsa_target value (update network weights)
-                self.model_1.fit(state_cast, qsa_target, epochs=1, verbose=0)
-            else:
-                # Update Q2
-                # qsa2 = Q2(S, A)
-                qsa2 = self.model_2.predict(state_cast)
-                # qsaprime2 = Q2(S', a)
-                qsaprime2 = self.model_2.predict(next_state_cast)
-                # qsaprime2_maxa = argmax a of Q2(S', a)
-                qsaprime2_maxa = np.argmax(qsaprime2[0])
-
-                # qsaprime1 = Q1(S', a)
-                qsaprime1 = self.model_1.predict(next_state_cast)
-
-                # Q2(S, A) <- Q2(S, A) + (R + y*Q1(S', argmax a of Q2(S', a)) - Q2(S, A))
-                target = qsa2[0][action] + (reward + self.gamma * qsaprime1[0][qsaprime2_maxa] - qsa2[0][action])
-                qsa_target = qsa2
-                qsa_target[0][action] = target
-
-                # Train the updated model to fit the new qsa_target value (update network weights)
-                self.model_2.fit(state_cast, qsa_target, epochs=1, verbose=0)
+            # Train the updated model to fit the new qsa_target value (update network weights)
+            self.model.fit(state_cast, qsa_target, epochs=1, verbose=0)
 
     # Decay the epsilon value by decay amount if it is not already at the minimum
     def decay_epsilon(self):
@@ -177,7 +148,7 @@ if __name__ == "__main__":
             # Remember the current information for experience replay
             memory.append((state, action, reward, next_state, done))
 
-            if t % 1000 == 0:
+            if t % 100 == 0:
                 # Source: •	https://towardsdatascience.com/reinforcement-learning-w-keras-openai-dqns-1eed3a5338c
                 # Update Q1(S, A) or Q2(S, A) using Experience Replay
                 agent.replay(minibatch_size, memory)
